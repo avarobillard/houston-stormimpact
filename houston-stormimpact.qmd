@@ -1,5 +1,18 @@
 ---
-title: "houston-stormimpact"
+title: "Houston Winter Storm and Power Outage Impact Analysis"
+author: Ava Robillard
+date: 10/30/25
 format: html
+execute:
+  message: false
+  warning: false
 ---
+As climate change increases the frequency of extreme weather events, the impacts of these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to severe winter storms. It is important to understand how the impact of losing power is felt across community groups, such as in the Houston, Texas metropolitan area.
+
+**Objective**: Use VIIRS, OpenStreetMap, and U.S. Census data to visualize the impacts of the winter storms by estimating the number of homes in the Houston metropolitan area that lost power and combine this with socioeconomic data about median household income to investigate whether these impacts were disproportionately felt. 
+
+## Load packages
+```{r}
+
+```
 
