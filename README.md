@@ -1,4 +1,4 @@
-# Houston Winter Storm and Power Outage Impact Analysis
+# Winter Storm Impact on Houston Power Outages
 
 Author: Ava Robillard
 
