@@ -17,26 +17,41 @@ library(tidyverse)
 library(stars)
 library(sf)
 library(terra)
+library(tmap)
 ```
 
 1. Load in all data 
 ```{r}
 # Read in night light data tiles
-tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
+#tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
 
-tile2_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
+#tile2_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
 
-tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
+#tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
 
-tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
+#tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
+
+# By rast()
+tile1_2021_02_07 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
+
+tile2_2021_02_07 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
+
+tile1_2021_02_16 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
+
+tile2_2021_02_16 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
 
 # Combine tiles for each date into a single continuous raster
-lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
+#lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
   
-lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
+#lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
+
+lights_2021_02_07 <- merge(tile1_2021_02_07, tile2_2021_02_07)
+  
+lights_2021_02_16 <- merge(tile1_2021_02_16, tile2_2021_02_16)
 
 # Visualize a combined tile
-plot(lights_2021_02_07)
+tm_shape(lights_2021_02_07) +
+  tm_raster()
 ```
 
 
@@ -53,45 +68,85 @@ OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')"
 ```
 
 ```{r}
-# This section needs a lot of help
-# Explore socioeconomic geodatabase layers- not showing up for some reason
-st_layers(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
-  
-ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48.gdb"), layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+# Read in entire geodatabase
+socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
 
-ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48.gdb"), layer = "B19013e1")
+# Explore socioeconomic geodatabase layers
+layer_info <- st_layers(dsn = here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
+layer_info
+
+# Create geometry layer
+ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"), layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+
+# Create attribute layer
+ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"), layer = "X19_INCOME")
   
+# Combine layers
+ACS_tracts <- ACS_tract_geometry %>% 
+  left_join(ACS_tract_attributes, by = "GEOID")
+```
+```{r}
 # Ensure data sets have same coordinate reference systems 
-if(crs(ACS_tract_geometry) == crs(ACS_tract_geometry)) {
+if(crs(roads) == crs(houses)) {
   print("Coordinate reference systems match")
 } else{
   warning("Updating coordinate reference systems to match")
   # transform data to match
-  boundary <- st_transform(ACS_tract_geometry, st_crs(ACS_tract_geometry))
+  boundary <- st_transform(roads, st_crs(houses))
+}
+
+if(crs(lights_2021_02_07) == crs(lights_2021_02_16)) {
+  print("Coordinate reference systems match")
+} else{
+  warning("Updating coordinate reference systems to match")
+  # transform data to match
+  boundary <- st_transform(lights_2021_02_07, st_crs(lights_2021_02_16))
+}
+
+if(crs(lights_2021_02_07) == crs(roads)) {
+  print("Coordinate reference systems match")
+} else{
+  warning("Updating coordinate reference systems to match")
+  # transform data to match
+  boundary <- st_transform(lights_2021_02_07, st_crs(roads))
+}
+
+# need to edit if use stars
+if(crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
+  print("Coordinate reference systems match")
+} else{
+  warning("Updating coordinate reference systems to match")
+  # transform data to match
+  boundary <- st_transform(ACS_tracts, crs(lights_2021_02_07))
 }
 ```
+
 
 2. Find locations that experienced a blackout by creating a mask
 ```{r}
 # Can't do with stars package?
 # Find the change in night lights intensity pre and post storm
 # Check for same extent and resolution first
-light_difference <- lights_2021_02_07 - lights_2021_02_16
-
-plot(light_difference)
+# after-before?
+light_difference <- lights_2021_02_16 - lights_2021_02_07
 
 # Reclassify the difference raster
-# Define a reclassification matrix
-rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
-                200, Inf, 2), # values 200 to Inf = 1
+# Define a reclassification matrix- neg or pos?
+rcl <- matrix(c(-Inf, -200, 0, # values -Inf to -200 = 0
+                -200, Inf, 1), # values -200 to Inf = 1
               ncol = 3, byrow = TRUE)
 
 # Apply the matrix to reclassify the raster, making all cells 0 or 1
 light_diff_rcl <- terra::classify(light_difference, rcl = rcl)
 
+values(light_diff_rcl) <- as.factor(values(light_diff_rcl))
+
 # Assign labels to the numerical categories
-levels(light_diff_rcl) <- tibble::tibble(id = 0:2, 
-                                  cats = c("no blackout", "blackout"))
+levels(light_diff_rcl) <- tibble::tibble(id = 0:1, 
+                                  Impact = c("no blackout", "blackout"))
+
+tm_shape(light_diff_rcl) +
+  tm_raster()
 ```
 
 
