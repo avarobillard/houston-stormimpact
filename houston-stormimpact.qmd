@@ -1,5 +1,5 @@
 ---
-title: "Houston Winter Storm and Power Outage Impact Analysis"
+title: "Houston Winter Storm and Power Outage Analysis"
 author: Ava Robillard
 date: 10/30/25
 format: html
@@ -7,12 +7,96 @@ execute:
   message: false
   warning: false
 ---
-As climate change increases the frequency of extreme weather events, the impacts of these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to severe winter storms. It is important to understand how the impact of losing power is felt across community groups, such as in the Houston, Texas metropolitan area.
+As climate change increases the frequency of extreme weather events, the impacts associated with these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to multiple severe winter storms. By understanding how the impact of losing power was felt across the Houston community, we can allocate resources and plan more strategically for future weather events.
 
 **Objective**: Use VIIRS, OpenStreetMap, and U.S. Census data to visualize the impacts of the winter storms by estimating the number of homes in the Houston metropolitan area that lost power and combine this with socioeconomic data about median household income to investigate whether these impacts were disproportionately felt. 
 
 ## Load packages
 ```{r}
+library(tidyverse)
+library(stars)
+library(sf)
+library(terra)
+```
+
+1. Load in all data 
+```{r}
+# Read in night light data tiles
+tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
+
+tile2_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
+
+tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
+
+tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
+
+# Combine tiles for each date into a single continuous raster
+lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
+  
+lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
+
+# Visualize a combined tile
+plot(lights_2021_02_07)
+```
+
+
+```{r}
+# Read in roads data and filter to only class motorway
+roads <- sf::st_read(here::here("data/gis_osm_roads_free_1.gpkg"), query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
+
+# Read in buildings data and filter to only types of houses
+houses <- sf::st_read(here::here("data/gis_osm_buildings_a_free_1.gpkg"), query = "SELECT *
+FROM gis_osm_buildings_a_free_1
+WHERE (type IS NULL AND name IS NULL)
+OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
 
 ```
 
+```{r}
+# This section needs a lot of help
+# Explore socioeconomic geodatabase layers- not showing up for some reason
+st_layers(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
+  
+ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48.gdb"), layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+
+ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48.gdb"), layer = "B19013e1")
+  
+# Ensure data sets have same coordinate reference systems 
+if(crs(ACS_tract_geometry) == crs(ACS_tract_geometry)) {
+  print("Coordinate reference systems match")
+} else{
+  warning("Updating coordinate reference systems to match")
+  # transform data to match
+  boundary <- st_transform(ACS_tract_geometry, st_crs(ACS_tract_geometry))
+}
+```
+
+2. Find locations that experienced a blackout by creating a mask
+```{r}
+# Can't do with stars package?
+# Find the change in night lights intensity pre and post storm
+# Check for same extent and resolution first
+light_difference <- lights_2021_02_07 - lights_2021_02_16
+
+plot(light_difference)
+
+# Reclassify the difference raster
+# Define a reclassification matrix
+rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
+                200, Inf, 2), # values 200 to Inf = 1
+              ncol = 3, byrow = TRUE)
+
+# Apply the matrix to reclassify the raster, making all cells 0 or 1
+light_diff_rcl <- terra::classify(light_difference, rcl = rcl)
+
+# Assign labels to the numerical categories
+levels(light_diff_rcl) <- tibble::tibble(id = 0:2, 
+                                  cats = c("no blackout", "blackout"))
+```
+
+
+3. Exclude highways from analysis
+
+4. Identify homes that experienced blackouts by combining the locations of homes and blackouts
+
+5. Identify the census tracts likely impacted by the blackout
