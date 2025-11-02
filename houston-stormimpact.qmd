@@ -23,31 +23,18 @@ library(tmap)
 1. Load in all data 
 ```{r}
 # Read in night light data tiles
-#tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
+tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
 
-#tile2_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
+tile2_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
 
-#tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
+tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
 
-#tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
+tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
 
-# By rast()
-tile1_2021_02_07 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
-
-tile2_2021_02_07 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
-
-tile1_2021_02_16 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
-
-tile2_2021_02_16 <- rast(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
-
-# Combine tiles for each date into a single continuous raster
-#lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
+# Combine tiles for each date into a single continuous raster- maps
+lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
   
-#lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
-
-lights_2021_02_07 <- merge(tile1_2021_02_07, tile2_2021_02_07)
-  
-lights_2021_02_16 <- merge(tile1_2021_02_16, tile2_2021_02_16)
+lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
 
 # Visualize a combined tile
 tm_shape(lights_2021_02_07) +
@@ -80,7 +67,9 @@ ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gd
 
 # Create attribute layer
 ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"), layer = "X19_INCOME")
-  
+
+# check CRSs here! 
+
 # Combine layers
 ACS_tracts <- ACS_tract_geometry %>% 
   left_join(ACS_tract_attributes, by = "GEOID")
@@ -127,31 +116,72 @@ if(crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
 # Can't do with stars package?
 # Find the change in night lights intensity pre and post storm
 # Check for same extent and resolution first
-# after-before?
-light_difference <- lights_2021_02_16 - lights_2021_02_07
+light_difference <- lights_2021_02_07 - lights_2021_02_16
+
+light_difference <- rast(light_difference)
 
 # Reclassify the difference raster
-# Define a reclassification matrix- neg or pos?
-rcl <- matrix(c(-Inf, -200, 0, # values -Inf to -200 = 0
-                -200, Inf, 1), # values -200 to Inf = 1
+rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
+                200, Inf, 1), # values 200 to Inf = 1
               ncol = 3, byrow = TRUE)
 
 # Apply the matrix to reclassify the raster, making all cells 0 or 1
-light_diff_rcl <- terra::classify(light_difference, rcl = rcl)
+light_diff_rcl <- classify(light_difference, rcl = rcl)
 
-values(light_diff_rcl) <- as.factor(values(light_diff_rcl))
-
-# Assign labels to the numerical categories
-levels(light_diff_rcl) <- tibble::tibble(id = 0:1, 
-                                  Impact = c("no blackout", "blackout"))
+# Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
+light_diff_rcl[light_diff_rcl == 0] <- NA
 
 tm_shape(light_diff_rcl) +
-  tm_raster()
+  tm_raster(title = "Blackout Areas",
+            palette = "Reds")
+
+
+# Vectorize the blackout mask and fix invalid geometries
+light_diff_vec <- light_diff_rcl %>% 
+  as.polygons(na.rm = TRUE) %>% 
+  st_as_sf() %>% 
+  st_make_valid()
+
+# Create bounding box for Houston area
+bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(4326))
+houston_box <- st_as_sfc(bb)
+
+# Spatially subset blackout mask to Houston area
+light_diff_houston <- light_diff_vec[houston_box, ]
+
+# Reproject to NAD83 / Texas Centric Albers Equal Area
+light_diff_houston <- st_transform(light_diff_houston, crs = 3083)
+
+tm_shape(light_diff_houston) +
+  tm_polygons(title = "Blackout Areas")
+
+# 0 is NA (false if less than 200) by indexing -> difference mask -> st_as_sf -> st_is_valid() -> st_make_valid() -> vector_difference_mask
+# st_bbox or st_points -> convert to a layer using st_as_sf, in CRS4326
+# st_intersects() or st_crop() -> st_transform()
 ```
 
 
 3. Exclude highways from analysis
 
+```{r}
+#st_buffer -> look at st_crs$units -> st_union -> st_disjoint -> st_join/st_difference- returns areas ->
+# use vector_difference and st_union for st_difference 
+```
+
+
 4. Identify homes that experienced blackouts by combining the locations of homes and blackouts
 
+```{r}
+# map and summary stat
+#buildings -> overlapped with areas non-highway and experienced a blackout- st_intersection/st_within/st_contains- changes interpretation (some homes fully within and partially within) -> homes that experienced blackout
+```
+
 5. Identify the census tracts likely impacted by the blackout
+
+```{r}
+#spatial join census data with homes that experienced blackouts, st_within or st_intersects
+#data wrangling to summarize median income by census tract
+```
+
+
+maps(2), map, #, map, ggplot
