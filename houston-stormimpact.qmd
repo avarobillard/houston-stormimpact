@@ -36,6 +36,13 @@ lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
   
 lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
 
+bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(lights_2021_02_07))
+lights_2021_02_07 <- st_crop(lights_2021_02_07, bb)
+
+lights_2021_02_16 <- st_crop(lights_2021_02_16, bb)
+
+# ST_CROP HERE & breaks in tm_raster(palette= , change breaks)
+
 # Visualize a combined tile
 tm_shape(lights_2021_02_07) +
   tm_raster()
@@ -151,16 +158,18 @@ light_diff_vec <- light_difference %>%
   st_make_valid()
 
 # Create bounding box for Houston area
-bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(4326))
-houston_box <- st_as_sfc(bb)
+#bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(3083))
+#light_diff_houston <- st_crop(light_diff_houston, bb)
+
+# Try st_crop- before!
 
 # Spatially subset blackout mask to Houston area
-light_diff_houston <- light_diff_vec[houston_box, ]
+#light_diff_houston <- light_diff_vec[houston_box, ]
 
 # Reproject to NAD83 / Texas Centric Albers Equal Area
-light_diff_houston <- st_transform(light_diff_houston, crs = 3083)
+#light_diff_houston <- st_transform(light_diff_houston, crs = 3083)
 
-tm_shape(light_diff_houston) +
+tm_shape(light_diff_vec) +
   tm_polygons(title = "Blackout Areas")
 
 # 0 is NA (false if less than 200) by indexing -> difference mask -> st_as_sf -> st_is_valid() -> st_make_valid() -> vector_difference_mask
@@ -178,24 +187,27 @@ tm_shape(light_diff_houston) +
 # Check units of CRS- meters
 st_crs(roads)$units
 
-# Create 200m buffer around all highways
-highway_buffer <- st_buffer(roads, dist = 200)
-
 # Combine buffer geometries 
-highway_union <- st_union(highway_buffer) 
+highway_union <- st_union(roads) 
+
+# Create 200m buffer around all highways
+highway_buffer <- st_buffer(highway_union, dist = 200)
 
 # Visualize buffer- 200m is small!
-tm_shape(highway_union) +
+tm_shape(highway_buffer) +
   tm_polygons(col = "black") +
   tm_shape(roads) +
   tm_lines(col = "pink", lwd = 0.4) +
   tm_title(text= "200m highway buffer")
 
 # Use st_disjoint to find areas that experienced blackouts further than 200m from a highway
-true_blackouts <- light_diff_houston[highway_union, , op = st_disjoint] %>% 
-   st_make_valid()
+#true_blackouts <- light_diff_houston[highway_union, , op = st_disjoint] %>% 
+   #st_make_valid()
 
-#true_blackouts <- st_difference(light_diff_houston, highway_union)
+# Transform CRS
+light_diff_vec <- st_transform(light_diff_vec, 3083)
+
+true_blackouts <- st_difference(light_diff_vec, highway_buffer)
 
 # Visualize true blackouts
 tm_shape(true_blackouts) +
@@ -210,17 +222,10 @@ tm_shape(true_blackouts) +
 #buildings -> overlapped with areas non-highway and experienced a blackout- st_intersection/st_within/st_contains- changes interpretation (some homes fully within and partially within) -> homes that experienced blackout
 
 # Filter homes to those that are contained within the true blackouts polygon
-# sparse binary predicate list
-blackout_houses_sgbp <- st_within(houses, true_blackouts)
-
-# convert to logical vector
-blackout_houses_logical <- lengths(blackout_houses_sgbp) > 0
-
-# filter based on logical vector
-blackout_houses <- houses[blackout_houses_logical, ]
+blackout_houses <- st_intersection(houses, true_blackouts)
 
 tm_shape(blackout_houses) +
-  tm_dots() 
+  tm_polygons() 
 ```
 
 5. Identify the census tracts likely impacted by the blackout
