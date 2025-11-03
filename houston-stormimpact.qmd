@@ -46,12 +46,17 @@ tm_shape(lights_2021_02_07) +
 # Read in roads data and filter to only class motorway
 roads <- sf::st_read(here::here("data/gis_osm_roads_free_1.gpkg"), query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
 
+# Transform CRS
+roads <- st_transform(roads, 3083)
+
 # Read in buildings data and filter to only types of houses
 houses <- sf::st_read(here::here("data/gis_osm_buildings_a_free_1.gpkg"), query = "SELECT *
 FROM gis_osm_buildings_a_free_1
 WHERE (type IS NULL AND name IS NULL)
 OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
 
+# Transform CRS
+houses <- st_transform(houses, 3083)
 ```
 
 ```{r}
@@ -84,7 +89,7 @@ if(crs(roads) == crs(houses)) {
   boundary <- st_transform(roads, st_crs(houses))
 }
 
-if(crs(lights_2021_02_07) == crs(lights_2021_02_16)) {
+if(st_crs(lights_2021_02_07) == st_crs(lights_2021_02_16)) {
   print("Coordinate reference systems match")
 } else{
   warning("Updating coordinate reference systems to match")
@@ -92,7 +97,7 @@ if(crs(lights_2021_02_07) == crs(lights_2021_02_16)) {
   boundary <- st_transform(lights_2021_02_07, st_crs(lights_2021_02_16))
 }
 
-if(crs(lights_2021_02_07) == crs(roads)) {
+if(st_crs(lights_2021_02_07) == crs(roads)) {
   print("Coordinate reference systems match")
 } else{
   warning("Updating coordinate reference systems to match")
@@ -100,45 +105,48 @@ if(crs(lights_2021_02_07) == crs(roads)) {
   boundary <- st_transform(lights_2021_02_07, st_crs(roads))
 }
 
-# need to edit if use stars
-if(crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
+if(st_crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
   print("Coordinate reference systems match")
 } else{
   warning("Updating coordinate reference systems to match")
   # transform data to match
-  boundary <- st_transform(ACS_tracts, crs(lights_2021_02_07))
+  boundary <- st_transform(ACS_tracts, st_crs(lights_2021_02_07))
 }
 ```
 
 
 2. Find locations that experienced a blackout by creating a mask
 ```{r}
-# Can't do with stars package?
 # Find the change in night lights intensity pre and post storm
 # Check for same extent and resolution first
 light_difference <- lights_2021_02_07 - lights_2021_02_16
 
-light_difference <- rast(light_difference)
+# the following code was for a reclassification- probably don't need
+#light_difference <- rast(light_difference)
 
 # Reclassify the difference raster
-rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
-                200, Inf, 1), # values 200 to Inf = 1
-              ncol = 3, byrow = TRUE)
+#rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
+                #200, Inf, 1), # values 200 to Inf = 1
+              #ncol = 3, byrow = TRUE)
 
 # Apply the matrix to reclassify the raster, making all cells 0 or 1
-light_diff_rcl <- classify(light_difference, rcl = rcl)
+#light_diff_rcl <- classify(light_difference, rcl = rcl)
 
 # Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
-light_diff_rcl[light_diff_rcl == 0] <- NA
+#light_diff_rcl[light_diff_rcl = 0] <- NA
 
-tm_shape(light_diff_rcl) +
+# Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
+light_difference[light_difference < 200] <- NA
+
+
+tm_shape(light_difference) +
   tm_raster(title = "Blackout Areas",
-            palette = "Reds")
+            palette = "-Blues")
 
 
 # Vectorize the blackout mask and fix invalid geometries
-light_diff_vec <- light_diff_rcl %>% 
-  as.polygons(na.rm = TRUE) %>% 
+light_diff_vec <- light_difference %>% 
+  #as.polygons(na.rm = TRUE) %>% 
   st_as_sf() %>% 
   st_make_valid()
 
@@ -166,6 +174,32 @@ tm_shape(light_diff_houston) +
 ```{r}
 #st_buffer -> look at st_crs$units -> st_union -> st_disjoint -> st_join/st_difference- returns areas ->
 # use vector_difference and st_union for st_difference 
+
+# Check units of CRS- meters
+st_crs(roads)$units
+
+# Create 200m buffer around all highways
+highway_buffer <- st_buffer(roads, dist = 200)
+
+# Combine buffer geometries 
+highway_union <- st_union(highway_buffer) 
+
+# Visualize buffer- 200m is small!
+tm_shape(highway_union) +
+  tm_polygons(col = "black") +
+  tm_shape(roads) +
+  tm_lines(col = "pink", lwd = 0.4) +
+  tm_title(text= "200m highway buffer")
+
+# Use st_disjoint to find areas that experienced blackouts further than 200m from a highway
+true_blackouts <- light_diff_houston[highway_union, , op = st_disjoint] %>% 
+   st_make_valid()
+
+#true_blackouts <- st_difference(light_diff_houston, highway_union)
+
+# Visualize true blackouts
+tm_shape(true_blackouts) +
+  tm_polygons()
 ```
 
 
@@ -174,6 +208,19 @@ tm_shape(light_diff_houston) +
 ```{r}
 # map and summary stat
 #buildings -> overlapped with areas non-highway and experienced a blackout- st_intersection/st_within/st_contains- changes interpretation (some homes fully within and partially within) -> homes that experienced blackout
+
+# Filter homes to those that are contained within the true blackouts polygon
+# sparse binary predicate list
+blackout_houses_sgbp <- st_within(houses, true_blackouts)
+
+# convert to logical vector
+blackout_houses_logical <- lengths(blackout_houses_sgbp) > 0
+
+# filter based on logical vector
+blackout_houses <- houses[blackout_houses_logical, ]
+
+tm_shape(blackout_houses) +
+  tm_dots() 
 ```
 
 5. Identify the census tracts likely impacted by the blackout
@@ -182,6 +229,3 @@ tm_shape(light_diff_houston) +
 #spatial join census data with homes that experienced blackouts, st_within or st_intersects
 #data wrangling to summarize median income by census tract
 ```
-
-
-maps(2), map, #, map, ggplot
