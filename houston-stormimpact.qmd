@@ -7,11 +7,13 @@ execute:
   message: false
   warning: false
 ---
+
 As climate change increases the frequency of extreme weather events, the impacts associated with these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to multiple severe winter storms. By understanding how the impact of losing power was felt across the Houston community, we can allocate resources and plan more strategically for future weather events.
 
-**Objective**: Use VIIRS, OpenStreetMap, and U.S. Census data to visualize the impacts of the winter storms by estimating the number of homes in the Houston metropolitan area that lost power and combine this with socioeconomic data about median household income to investigate whether these impacts were disproportionately felt. 
+**Objective**: Use VIIRS, OpenStreetMap, and U.S. Census data to visualize the impacts of the winter storms by estimating the number of homes in the Houston metropolitan area that lost power and combine this with socioeconomic data about median household income to investigate whether these impacts were disproportionately felt.
 
 ## Load packages
+
 ```{r}
 library(tidyverse)
 library(stars)
@@ -20,7 +22,8 @@ library(terra)
 library(tmap)
 ```
 
-1. Load in all data 
+1.  Load in all data
+
 ```{r}
 # Read in night light data tiles
 tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
@@ -36,57 +39,97 @@ lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
   
 lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
 
-bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(lights_2021_02_07))
+# Crop each light raster to Houston area
+bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(lights_2021_02_07))
 lights_2021_02_07 <- st_crop(lights_2021_02_07, bb)
 
 lights_2021_02_16 <- st_crop(lights_2021_02_16, bb)
 
-# ST_CROP HERE & breaks in tm_raster(palette= , change breaks)
-
-# Visualize a combined tile
-tm_shape(lights_2021_02_07) +
-  tm_raster()
+# do i want to transform crs here? right now it is EPSG 4326
 ```
 
+Map light differences
 
 ```{r}
-# Read in roads data and filter to only class motorway
-roads <- sf::st_read(here::here("data/gis_osm_roads_free_1.gpkg"), query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
+# Plot before and after- pick which style and fix legend 
+before_lights <- tm_shape(lights_2021_02_07) +
+  tm_raster(col.scale = tmap::tm_scale_continuous(
+    values = "-brewer.Greys"),
+    col.legend = tmap::tm_legend(
+      title = "Luminance (cm-2sr-1)",
+      position = tmap::tm_pos_in("left", "bottom"))
+    ) +
+  tm_title(text = "Houston Area Luminance: Feb 7th, 2021") +
+  tmap::tm_compass() 
 
-# Transform CRS
+after_lights <- tm_shape(lights_2021_02_16) +
+  tm_raster(palette = colorRampPalette(c("black", "white")) (6),
+      title = "Luminance (cm-2sr-1)"
+    ) +
+  tm_title(text = "Houston Area Luminance: Feb 16th, 2021") +
+  tmap::tm_compass(position = c("right", "bottom")) 
+
+tmap_arrange(before_lights, after_lights)
+```
+
+```{r}
+#| message: false
+# Read in roads data and filter to only class motorway
+roads <- sf::st_read(here::here("data/gis_osm_roads_free_1.gpkg"),
+                     query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'",
+                     quiet = TRUE)
+
+# Transform CRS to NAD83 / Texas Centric Albers Equal Area
 roads <- st_transform(roads, 3083)
 
 # Read in buildings data and filter to only types of houses
-houses <- sf::st_read(here::here("data/gis_osm_buildings_a_free_1.gpkg"), query = "SELECT *
-FROM gis_osm_buildings_a_free_1
-WHERE (type IS NULL AND name IS NULL)
-OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
+houses <- sf::st_read(here::here("data/gis_osm_buildings_a_free_1.gpkg"),
+                      query = "SELECT * FROM gis_osm_buildings_a_free_1 WHERE (type IS NULL AND name IS NULL)
+OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')",
+                      quiet = TRUE)
 
-# Transform CRS
+# Transform CRS to NAD83 / Texas Centric Albers Equal Area
 houses <- st_transform(houses, 3083)
 ```
 
 ```{r}
 # Read in entire geodatabase
-socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
+socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"), quiet = TRUE)
 
 # Explore socioeconomic geodatabase layers
 layer_info <- st_layers(dsn = here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
-layer_info
+#layer_info
 
-# Create geometry layer
-ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"), layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+# Create geometry layer using appropriate layer names
+ACS_tract_geometry <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"),
+                              layer = "ACS_2019_5YR_TRACT_48_TEXAS",
+                              quiet = TRUE)
 
-# Create attribute layer
-ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"), layer = "X19_INCOME")
+# Create attribute layer 
+ACS_tract_attributes <- st_read(here::here("data", "ACS_2019_5YR_TRACT_48_TEXAS.gdb"),
+                                layer = "X19_INCOME",
+                                quiet = TRUE)
 
-# check CRSs here! 
+# Rename GEOID_Data column in ACS_tract_geometry to GEOID for a correct join
+ACS_tract_geometry <- ACS_tract_geometry %>% 
+  rename(GEOID_old = GEOID) %>% 
+  rename(GEOID = GEOID_Data)
 
-# Combine layers
+# Combine layers and reproject to NAD83 / Texas Centric Albers Equal Area
 ACS_tracts <- ACS_tract_geometry %>% 
-  left_join(ACS_tract_attributes, by = "GEOID")
+  left_join(ACS_tract_attributes, by = "GEOID") %>% 
+  st_as_sf() 
+
+# Crop to Houston area
+bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(ACS_tracts))
+ACS_tracts <- st_crop(ACS_tracts, bb) 
+
+# Transform CRS to NAD83 / Texas Centric Albers Equal Area
+ACS_tracts <- st_transform(ACS_tracts, 3083)
 ```
+
 ```{r}
+## FIX THIS!!!
 # Ensure data sets have same coordinate reference systems 
 if(crs(roads) == crs(houses)) {
   print("Coordinate reference systems match")
@@ -121,116 +164,104 @@ if(st_crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
 }
 ```
 
+2.  Find locations that experienced a blackout by creating a mask
 
-2. Find locations that experienced a blackout by creating a mask
 ```{r}
 # Find the change in night lights intensity pre and post storm
-# Check for same extent and resolution first
+# Check for same extent and resolution first!
 light_difference <- lights_2021_02_07 - lights_2021_02_16
-
-# the following code was for a reclassification- probably don't need
-#light_difference <- rast(light_difference)
-
-# Reclassify the difference raster
-#rcl <- matrix(c(-Inf, 200, 0, # values -Inf to 200 = 0
-                #200, Inf, 1), # values 200 to Inf = 1
-              #ncol = 3, byrow = TRUE)
-
-# Apply the matrix to reclassify the raster, making all cells 0 or 1
-#light_diff_rcl <- classify(light_difference, rcl = rcl)
-
-# Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
-#light_diff_rcl[light_diff_rcl = 0] <- NA
 
 # Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
 light_difference[light_difference < 200] <- NA
 
-
-tm_shape(light_difference) +
-  tm_raster(title = "Blackout Areas",
-            palette = "-Blues")
-
-
 # Vectorize the blackout mask and fix invalid geometries
 light_diff_vec <- light_difference %>% 
-  #as.polygons(na.rm = TRUE) %>% 
-  st_as_sf() %>% 
-  st_make_valid()
-
-# Create bounding box for Houston area
-#bb <- st_bbox(c(xmin = -94.5, xmax = -96.5, ymax = 30.5, ymin = 29.0), crs = st_crs(3083))
-#light_diff_houston <- st_crop(light_diff_houston, bb)
-
-# Try st_crop- before!
-
-# Spatially subset blackout mask to Houston area
-#light_diff_houston <- light_diff_vec[houston_box, ]
-
-# Reproject to NAD83 / Texas Centric Albers Equal Area
-#light_diff_houston <- st_transform(light_diff_houston, crs = 3083)
-
-tm_shape(light_diff_vec) +
-  tm_polygons(title = "Blackout Areas")
-
-# 0 is NA (false if less than 200) by indexing -> difference mask -> st_as_sf -> st_is_valid() -> st_make_valid() -> vector_difference_mask
-# st_bbox or st_points -> convert to a layer using st_as_sf, in CRS4326
-# st_intersects() or st_crop() -> st_transform()
+  st_as_sf() %>% #add st_is_valid() in here before st_make_valid, then check output
+  st_make_valid() %>% 
+  st_transform(3083)
 ```
 
-
-3. Exclude highways from analysis
+3.  Exclude highways from analysis
 
 ```{r}
-#st_buffer -> look at st_crs$units -> st_union -> st_disjoint -> st_join/st_difference- returns areas ->
-# use vector_difference and st_union for st_difference 
-
-# Check units of CRS- meters
-st_crs(roads)$units
-
-# Combine buffer geometries 
-highway_union <- st_union(roads) 
+#| warning: false
+# Check units of CRS for distance argument in buffer
+units <- st_crs(roads)$units
 
 # Create 200m buffer around all highways
-highway_buffer <- st_buffer(highway_union, dist = 200)
+highway_buffer <- st_buffer(roads, dist = 200)
 
-# Visualize buffer- 200m is small!
-tm_shape(highway_buffer) +
+# Combine buffer geometries- dissolve multi-polygons
+highway_union <- st_union(highway_buffer) 
+
+# Create data frame for blackouts that are not in the highway union
+true_blackouts <- st_difference(light_diff_vec, highway_union)
+
+# Visualize buffer- 200m is small!- is this properly filtering?
+tm_shape(highway_union) +
   tm_polygons(col = "black") +
   tm_shape(roads) +
   tm_lines(col = "pink", lwd = 0.4) +
-  tm_title(text= "200m highway buffer")
-
-# Use st_disjoint to find areas that experienced blackouts further than 200m from a highway
-#true_blackouts <- light_diff_houston[highway_union, , op = st_disjoint] %>% 
-   #st_make_valid()
-
-# Transform CRS
-light_diff_vec <- st_transform(light_diff_vec, 3083)
-
-true_blackouts <- st_difference(light_diff_vec, highway_buffer)
-
-# Visualize true blackouts
+  tm_title(text= "200m highway buffer") +
 tm_shape(true_blackouts) +
-  tm_polygons()
+  tm_polygons(col = "lightblue")
 ```
 
+The units of the roads CRS is `r units`.
 
-4. Identify homes that experienced blackouts by combining the locations of homes and blackouts
+4.  Identify homes that experienced blackouts by combining the locations of homes and blackouts
 
 ```{r}
-# map and summary stat
-#buildings -> overlapped with areas non-highway and experienced a blackout- st_intersection/st_within/st_contains- changes interpretation (some homes fully within and partially within) -> homes that experienced blackout
-
-# Filter homes to those that are contained within the true blackouts polygon
+#| warning: false
+# Filter homes to those that intersect with the true blackouts polygon
 blackout_houses <- st_intersection(houses, true_blackouts)
 
-tm_shape(blackout_houses) +
-  tm_polygons() 
-```
+# Get number of affected homes by number of rows
+n_affected_houses <- nrow(blackout_houses)
 
-5. Identify the census tracts likely impacted by the blackout
+### FIX MAP HERE
+tm_shape(blackout_houses) +
+  tm_polygons() +
+  tm_title(text = "Houses that experienced blackouts")
+```
+The estimated number of homes in Houston that lost power between February 7th and February 16th, 2021 is `r n_affected_houses`.
+
+5.  Identify the census tracts likely impacted by the blackout
 
 ```{r}
-#spatial join census data with homes that experienced blackouts, st_within or st_intersects
-#data wrangling to summarize median income by census tract
+# In socioeconomic ACS_tracts data, make a column with true where there is a home with a blackout (blackout_houses) in the census tract- then join with full to get falses-
+
+# Intersect ACS_tracts data and blackout homes data- makes all true?
+blackedout_tracts <- st_filter(ACS_tracts, blackout_houses) %>% 
+  mutate(blackout = TRUE)
+
+# TRUE/FALSE column
+census <- ACS_tracts %>% 
+  mutate(blackout = ACS_tracts$GEOID %in% blackedout_tracts$GEOID)
+
+# Filter census data frame to reduce computation time
+census <- census %>% 
+  select('GEOID', 'B19013e1', 'Shape', 'TRACTCE', 'blackout')
+
+# Select true blackouts for plotting
+census_true <- census %>% 
+  filter(blackout == TRUE)
+
+# plot full census tracts and overlay with plotted true census tracts
+tm_shape(census) +
+  tm_polygons() +
+tm_shape(census_true) +
+  tm_polygons(fill = 'blue') 
+```
+
+6.  Create plot comparing distributions of median household income for census tracts that did and did not experience blackouts
+
+```{r}
+#| warning: false
+#| message: false
+median_income_hist <- ggplot(census, aes(x = B19013e1)) +
+  geom_histogram(fill = 'darkblue') +
+  facet_wrap(~blackout)
+
+median_income_hist
 ```
