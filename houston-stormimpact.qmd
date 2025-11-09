@@ -21,9 +21,14 @@ library(sf)
 library(terra)
 library(tmap)
 ```
+```{r}
+# Delete later
+#Veronese = list(c("#67322e", "#99610a", "#c38f16", "#6e948c", "#2c6b67", "#175449", "#122c43"), c(5, 1, 7, 2, 3, 6, 4), colorblind=TRUE),
+```
 
-1.  Load in all data
+## 1. Load in all data
 
+### A) Night lights VIIRS data
 ```{r}
 # Read in night light data tiles
 tile1_2021_02_07 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
@@ -34,24 +39,25 @@ tile1_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A20
 
 tile2_2021_02_16 <- stars::read_stars(here::here("data", "VNP46A1", "VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
 
-# Combine tiles for each date into a single continuous raster- maps
+# Combine tiles for each date into a single continuous raster
 lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
   
 lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
 
 # Crop each light raster to Houston area
 bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(lights_2021_02_07))
+
 lights_2021_02_07 <- st_crop(lights_2021_02_07, bb)
-
 lights_2021_02_16 <- st_crop(lights_2021_02_16, bb)
-
-# do i want to transform crs here? right now it is EPSG 4326
 ```
 
-Map light differences
+#### Map light differences
+
+To visually compare the night light intensities before and after the first two storms, the VIIRS light rasters from February 7th (before) and February 16th (after) were mapped side by side. 
 
 ```{r}
-# Plot before and after- pick which style and fix legend 
+#| message: false
+# Create plot of Feb 7th light raster- before storm
 before_lights <- tm_shape(lights_2021_02_07) +
   tm_raster(col.scale = tmap::tm_scale_continuous(
     values = "-brewer.Greys"),
@@ -60,18 +66,29 @@ before_lights <- tm_shape(lights_2021_02_07) +
       position = tmap::tm_pos_in("left", "bottom"))
     ) +
   tm_title(text = "Houston Area Luminance: Feb 7th, 2021") +
-  tmap::tm_compass() 
+  tm_layout(legend.text.size = 0.5,
+            legend.title.size = 0.5) +
+  tm_graticules(alpha = 0.2) 
 
+# Create plot of Feb 16th light raster- after storm
 after_lights <- tm_shape(lights_2021_02_16) +
-  tm_raster(palette = colorRampPalette(c("black", "white")) (6),
-      title = "Luminance (cm-2sr-1)"
+  tm_raster(col.scale = tmap::tm_scale_continuous(
+    values = "-brewer.Greys"),
+    col.legend = tmap::tm_legend(
+      title = "Luminance (cm-2sr-1)",
+      position = tmap::tm_pos_in("left", "bottom"))
     ) +
   tm_title(text = "Houston Area Luminance: Feb 16th, 2021") +
-  tmap::tm_compass(position = c("right", "bottom")) 
+  tm_layout(legend.text.size = 0.5,
+            legend.title.size = 0.5) +
+  tm_graticules(alpha = 0.2) 
 
 tmap_arrange(before_lights, after_lights)
 ```
 
+There are more lights visible in the date prior to the storms. 
+
+### B) Roads and Houses data from OpenStreetMap
 ```{r}
 #| message: false
 # Read in roads data and filter to only class motorway
@@ -92,6 +109,7 @@ OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')"
 houses <- st_transform(houses, 3083)
 ```
 
+### C) Socioeconomic attribute data and census tract geometries from the U.S Census Bureau 
 ```{r}
 # Read in entire geodatabase
 socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"), quiet = TRUE)
@@ -115,19 +133,21 @@ ACS_tract_geometry <- ACS_tract_geometry %>%
   rename(GEOID_old = GEOID) %>% 
   rename(GEOID = GEOID_Data)
 
-# Combine layers and reproject to NAD83 / Texas Centric Albers Equal Area
+# Combine layers 
 ACS_tracts <- ACS_tract_geometry %>% 
   left_join(ACS_tract_attributes, by = "GEOID") %>% 
   st_as_sf() 
 
 # Crop to Houston area
 bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(ACS_tracts))
+
 ACS_tracts <- st_crop(ACS_tracts, bb) 
 
 # Transform CRS to NAD83 / Texas Centric Albers Equal Area
 ACS_tracts <- st_transform(ACS_tracts, 3083)
 ```
 
+As a final data loading step, we want to ensure that the **CRS of each data set is the same** for further spatial operations. The CRS we are using for this analysis is the **NAD83 / Texas Centric Albers Equal Area projection, or EPSG:3083**.
 ```{r}
 ## FIX THIS!!!
 # Ensure data sets have same coordinate reference systems 
@@ -164,7 +184,9 @@ if(st_crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
 }
 ```
 
-2.  Find locations that experienced a blackout by creating a mask
+### 2. Find locations that experienced a blackout by creating a mask
+
+To identify places that experienced a blackout, a mask was created to indicate for each cell whether or not it experienced a blackout. The threshold for this mask was a drop of more than 200 nW cm-2sr-1 between the pre and post storm night light rasters. This blackout mask was then vectorized.
 
 ```{r}
 # Find the change in night lights intensity pre and post storm
@@ -181,7 +203,9 @@ light_diff_vec <- light_difference %>%
   st_transform(3083)
 ```
 
-3.  Exclude highways from analysis
+### 3. Exclude highways from analysis
+
+Starting with the vectorized blackout mask, areas within 200m of a highway needed to be excluded as well from the analysis as these areas experience potentially confounding changes in light intensity unrelated to the storm.  
 
 ```{r}
 #| warning: false
@@ -189,7 +213,7 @@ light_diff_vec <- light_difference %>%
 units <- st_crs(roads)$units
 
 # Create 200m buffer around all highways
-highway_buffer <- st_buffer(roads, dist = 200)
+highway_buffer <- st_buffer(roads, dist = 200) 
 
 # Combine buffer geometries- dissolve multi-polygons
 highway_union <- st_union(highway_buffer) 
@@ -199,17 +223,19 @@ true_blackouts <- st_difference(light_diff_vec, highway_union)
 
 # Visualize buffer- 200m is small!- is this properly filtering?
 tm_shape(highway_union) +
-  tm_polygons(col = "black") +
+  tm_polygons(col = "#c38f16") +
   tm_shape(roads) +
-  tm_lines(col = "pink", lwd = 0.4) +
+  tm_lines(col = "#122c43", lwd = 0.4) +
   tm_title(text= "200m highway buffer") +
 tm_shape(true_blackouts) +
-  tm_polygons(col = "lightblue")
+  tm_polygons(col = "#99610a")
 ```
 
 The units of the roads CRS is `r units`.
 
-4.  Identify homes that experienced blackouts by combining the locations of homes and blackouts
+### 4. Identify homes that experienced blackouts by combining the locations of homes and blackouts
+
+Using the finalized vector data for areas that experienced blackouts from the previous analysis step, homes that experienced blackouts were identified by filtering the houses data to those that intersect with the true blackout polygons.
 
 ```{r}
 #| warning: false
@@ -226,16 +252,17 @@ tm_shape(blackout_houses) +
 ```
 The estimated number of homes in Houston that lost power between February 7th and February 16th, 2021 is `r n_affected_houses`.
 
-5.  Identify the census tracts likely impacted by the blackout
+### 5. Identify the census tracts likely impacted by the blackout
+
+To identify the census tracts impacted by the blackout, the U.S Census tract data was filtered to only census tracts that spatially intersected homes that experienced blackouts. An additional column was added to retain this information, where TRUE corresponds to a tract that had homes that experienced a blackout and FALSE corresponds to those that did not. These census polygons were filtered based on this column and plotted in separate colors to visualize the impact in the Houston area by census tract.
 
 ```{r}
-# In socioeconomic ACS_tracts data, make a column with true where there is a home with a blackout (blackout_houses) in the census tract- then join with full to get falses-
-
-# Intersect ACS_tracts data and blackout homes data- makes all true?
+#| message: false
+# Create data frame for tracts that intersect homes that experienced blackouts and create new column of 'TRUE'
 blackedout_tracts <- st_filter(ACS_tracts, blackout_houses) %>% 
   mutate(blackout = TRUE)
 
-# TRUE/FALSE column
+# Define logic-based TRUE/FALSE column in full census data using previous data frame values
 census <- ACS_tracts %>% 
   mutate(blackout = ACS_tracts$GEOID %in% blackedout_tracts$GEOID)
 
@@ -247,11 +274,20 @@ census <- census %>%
 census_true <- census %>% 
   filter(blackout == TRUE)
 
-# plot full census tracts and overlay with plotted true census tracts
+# Plot full census tracts and overlay with plotted true census tracts
 tm_shape(census) +
-  tm_polygons() +
+  tm_polygons(fill = "#dce6e5") +
 tm_shape(census_true) +
-  tm_polygons(fill = 'blue') 
+  tm_polygons(fill = "#6e948c") +
+  tm_add_legend(type = "polygons",
+                labels = c("Affected", "Unaffected"),
+                fill = c("#6e948c", "#dce6e5"),
+                title = "Tract Status") +
+  tm_layout(frame.double_line = TRUE) +
+  tm_title(text = "Houston Area Census Tracts Impacted by the Blackout") +
+  tm_borders(lwd = 0.8) +
+  tm_compass(size = 2) +
+  tm_graticules(alpha = 0.2)
 ```
 
 6.  Create plot comparing distributions of median household income for census tracts that did and did not experience blackouts
@@ -259,9 +295,36 @@ tm_shape(census_true) +
 ```{r}
 #| warning: false
 #| message: false
-median_income_hist <- ggplot(census, aes(x = B19013e1)) +
-  geom_histogram(fill = 'darkblue') +
-  facet_wrap(~blackout)
+# Plot histogram of median income faceted by tracts affected and unaffected by the blackouts
+median_income_hist <- ggplot(census, aes(x = B19013e1, fill = blackout)) +
+  geom_histogram(color = "#484f4f") +
+  scale_fill_manual(values = c("#dce6e5","#6e948c"),
+                    labels = c("Unaffected", "Affected")) +
+  facet_wrap(~blackout, 
+             labeller = as_labeller(c(`TRUE` = "Affected", `FALSE` = "Unaffected")) 
+  ) +
+  labs(title = "Median Household Income by Blackout Status",
+    x = "Median Household Income (USD)",
+    y = "Count",
+    fill = "Census Tract Status"      
+  ) +
+  theme_minimal()
 
 median_income_hist
 ```
+
+```{r}
+#| warning: false
+# Create boxplot of median income faceted by tracts affected and unaffected by the blackouts
+median_income_box <- ggplot(census, aes(x = B19013e1)) +
+  geom_boxplot() +
+  facet_wrap(~blackout,
+             labeller = as_labeller(c(`TRUE` = "Affected", `FALSE` = "Unaffected"))) +
+  labs(title = "Median Household Income by Blackout Status",
+       x = "Median Household Income (USD)") +
+  theme_minimal()
+
+median_income_box
+```
+
+Write interpretation here!!
