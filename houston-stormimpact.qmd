@@ -1,11 +1,10 @@
 ---
 title: "Houston Winter Storm and Power Outage Analysis"
 author: Ava Robillard
-date: 10/30/25
+date: 11/11/25
 format: html
 execute:
   message: false
-  warning: false
 ---
 
 As climate change increases the frequency of extreme weather events, the impacts associated with these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to multiple severe winter storms. By understanding how the impact of losing power was felt across the Houston community, we can allocate resources and plan more strategically for future weather events.
@@ -15,17 +14,13 @@ As climate change increases the frequency of extreme weather events, the impacts
 ## Load packages
 
 ```{r}
+#| warning: false
 library(tidyverse)
 library(stars)
 library(sf)
 library(terra)
 library(tmap)
 ```
-```{r}
-# Delete later
-#Veronese = list(c("#67322e", "#99610a", "#c38f16", "#6e948c", "#2c6b67", "#175449", "#122c43"), c(5, 1, 7, 2, 3, 6, 4), colorblind=TRUE),
-```
-
 ## 1. Load in all data
 
 ### A) Night lights VIIRS data
@@ -111,6 +106,7 @@ houses <- st_transform(houses, 3083)
 
 ### C) Socioeconomic attribute data and census tract geometries from the U.S Census Bureau 
 ```{r}
+#| warning: false
 # Read in entire geodatabase
 socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"), quiet = TRUE)
 
@@ -149,38 +145,21 @@ ACS_tracts <- st_transform(ACS_tracts, 3083)
 
 As a final data loading step, we want to ensure that the **CRS of each data set is the same** for further spatial operations. The CRS we are using for this analysis is the **NAD83 / Texas Centric Albers Equal Area projection, or EPSG:3083**.
 ```{r}
-## FIX THIS!!!
 # Ensure data sets have same coordinate reference systems 
-if(crs(roads) == crs(houses)) {
+if((st_crs(roads) == st_crs(houses))
+   & (st_crs(houses) == st_crs(lights_2021_02_07)) 
+   & (st_crs(lights_2021_02_07) == st_crs(lights_2021_02_16))
+   & (st_crs(lights_2021_02_07) == st_crs(ACS_tracts))){
   print("Coordinate reference systems match")
 } else{
-  warning("Updating coordinate reference systems to match")
-  # transform data to match
-  boundary <- st_transform(roads, st_crs(houses))
-}
-
-if(st_crs(lights_2021_02_07) == st_crs(lights_2021_02_16)) {
-  print("Coordinate reference systems match")
-} else{
-  warning("Updating coordinate reference systems to match")
-  # transform data to match
-  boundary <- st_transform(lights_2021_02_07, st_crs(lights_2021_02_16))
-}
-
-if(st_crs(lights_2021_02_07) == crs(roads)) {
-  print("Coordinate reference systems match")
-} else{
-  warning("Updating coordinate reference systems to match")
-  # transform data to match
-  boundary <- st_transform(lights_2021_02_07, st_crs(roads))
-}
-
-if(st_crs(lights_2021_02_07) == st_crs(ACS_tracts)) {
-  print("Coordinate reference systems match")
-} else{
-  warning("Updating coordinate reference systems to match")
-  # transform data to match
-  boundary <- st_transform(ACS_tracts, st_crs(lights_2021_02_07))
+  warning(" Updating coordinate reference systems to match")
+  # transform data to match selected CRS
+  crs_3083 <- st_crs(roads)
+  
+  roads <- st_transform(roads, crs_3083)
+  lights_2021_02_07 <- st_transform(lights_2021_02_07, crs_3083)
+  lights_2021_02_16 <- st_transform(lights_2021_02_16, crs_3083)
+  ACS_tracts <- st_transform(ACS_tracts, crs_3083)
 }
 ```
 
@@ -190,7 +169,7 @@ To identify places that experienced a blackout, a mask was created to indicate f
 
 ```{r}
 # Find the change in night lights intensity pre and post storm
-# Check for same extent and resolution first!
+# Check for same extent and resolution first! make into WARNING MESSAGE
 light_difference <- lights_2021_02_07 - lights_2021_02_16
 
 # Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
@@ -198,9 +177,11 @@ light_difference[light_difference < 200] <- NA
 
 # Vectorize the blackout mask and fix invalid geometries
 light_diff_vec <- light_difference %>% 
-  st_as_sf() %>% #add st_is_valid() in here before st_make_valid, then check output
-  st_make_valid() %>% 
+  st_as_sf() %>% 
   st_transform(3083)
+
+# Check for valid geometry- make into WARNING MESSAGE
+print(any(!st_is_valid(light_diff_vec)))
 ```
 
 ### 3. Exclude highways from analysis
@@ -221,21 +202,21 @@ highway_union <- st_union(highway_buffer)
 # Create data frame for blackouts that are not in the highway union
 true_blackouts <- st_difference(light_diff_vec, highway_union)
 
-# Visualize buffer- 200m is small!- is this properly filtering?
+# Visualize buffer
 tm_shape(highway_union) +
   tm_polygons(col = "#c38f16") +
-  tm_shape(roads) +
-  tm_lines(col = "#122c43", lwd = 0.4) +
   tm_title(text= "200m highway buffer") +
 tm_shape(true_blackouts) +
-  tm_polygons(col = "#99610a")
+  tm_polygons(col = "#122c43") +
+  tm_basemap("CartoDB.PositronNoLabels") +
+  tm_graticules(alpha = 0.2) 
 ```
 
 The units of the roads CRS is `r units`.
 
 ### 4. Identify homes that experienced blackouts by combining the locations of homes and blackouts
 
-Using the finalized vector data for areas that experienced blackouts from the previous analysis step, homes that experienced blackouts were identified by filtering the houses data to those that intersect with the true blackout polygons.
+Using the finalized vector data for areas that experienced blackouts from the previous analysis step, homes that experienced blackouts were identified by filtering the houses data to those that intersect with the true blackout polygons. The count of homes that lost power is therefore the number of rows in the resulting data frame.
 
 ```{r}
 #| warning: false
@@ -245,10 +226,12 @@ blackout_houses <- st_intersection(houses, true_blackouts)
 # Get number of affected homes by number of rows
 n_affected_houses <- nrow(blackout_houses)
 
-### FIX MAP HERE
+# Create map of homes that experienced blackouts
 tm_shape(blackout_houses) +
-  tm_polygons() +
-  tm_title(text = "Houses that experienced blackouts")
+  tm_polygons(fill = "#122c43") +
+  tm_basemap("CartoDB.PositronNoLabels") +
+  tm_title(text = "Houston Homes that Experienced Blackouts") +
+  tm_graticules(alpha = 0.2)
 ```
 The estimated number of homes in Houston that lost power between February 7th and February 16th, 2021 is `r n_affected_houses`.
 
@@ -268,11 +251,11 @@ census <- ACS_tracts %>%
 
 # Filter census data frame to reduce computation time
 census <- census %>% 
-  select('GEOID', 'B19013e1', 'Shape', 'TRACTCE', 'blackout')
+  select('GEOID', 'B19013e1', 'Shape', 'TRACTCE', 'blackout') 
 
 # Select true blackouts for plotting
 census_true <- census %>% 
-  filter(blackout == TRUE)
+  filter(blackout == TRUE) 
 
 # Plot full census tracts and overlay with plotted true census tracts
 tm_shape(census) +
@@ -284,9 +267,9 @@ tm_shape(census_true) +
                 fill = c("#6e948c", "#dce6e5"),
                 title = "Tract Status") +
   tm_layout(frame.double_line = TRUE) +
+  tm_basemap("CartoDB.PositronNoLabels") +
   tm_title(text = "Houston Area Census Tracts Impacted by the Blackout") +
   tm_borders(lwd = 0.8) +
-  tm_compass(size = 2) +
   tm_graticules(alpha = 0.2)
 ```
 
@@ -303,7 +286,7 @@ median_income_hist <- ggplot(census, aes(x = B19013e1, fill = blackout)) +
   facet_wrap(~blackout, 
              labeller = as_labeller(c(`TRUE` = "Affected", `FALSE` = "Unaffected")) 
   ) +
-  labs(title = "Median Household Income by Blackout Status",
+  labs(title = "Median Household Income by Census Blackout Status",
     x = "Median Household Income (USD)",
     y = "Count",
     fill = "Census Tract Status"      
@@ -316,12 +299,14 @@ median_income_hist
 ```{r}
 #| warning: false
 # Create boxplot of median income faceted by tracts affected and unaffected by the blackouts
-median_income_box <- ggplot(census, aes(x = B19013e1)) +
-  geom_boxplot() +
-  facet_wrap(~blackout,
-             labeller = as_labeller(c(`TRUE` = "Affected", `FALSE` = "Unaffected"))) +
-  labs(title = "Median Household Income by Blackout Status",
-       x = "Median Household Income (USD)") +
+median_income_box <- ggplot(census, aes(x = blackout, y = B19013e1, fill = blackout)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("#dce6e5","#6e948c"),
+                    labels = c("Unaffected", "Affected")) +
+  labs(title = "Median Household Income by Census Blackout Status",
+       x = "Blackout",
+       y = "Median Household Income (USD)",
+       fill = "Census Tract Status") +
   theme_minimal()
 
 median_income_box
