@@ -6,6 +6,8 @@ format: pdf
 execute:
   message: false
 ---
+![README1](images/readme1.png)
+![README2](images/readme2.png)
 
 As climate change increases the frequency of extreme weather events, the impacts associated with these events are felt more intensely by the communities that live there. In February of 2021, Texas experienced a power crisis due to multiple severe winter storms. By understanding how the impact of losing power was felt across the Houston community, we can allocate resources and plan more strategically for future weather events.
 
