@@ -2,7 +2,7 @@
 title: "Houston Winter Storm and Power Outage Analysis"
 author: Ava Robillard
 date: 11/11/25
-format: html
+format: pdf
 execute:
   message: false
 ---
@@ -20,6 +20,8 @@ library(stars)
 library(sf)
 library(terra)
 library(tmap)
+library(testthat)
+library(scales)
 ```
 ## 1. Load in all data
 
@@ -40,7 +42,8 @@ lights_2021_02_07 <- st_mosaic(tile1_2021_02_07, tile2_2021_02_07)
 lights_2021_02_16 <- st_mosaic(tile1_2021_02_16, tile2_2021_02_16)
 
 # Crop each light raster to Houston area
-bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(lights_2021_02_07))
+bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0),
+              crs = st_crs(lights_2021_02_07))
 
 lights_2021_02_07 <- st_crop(lights_2021_02_07, bb)
 lights_2021_02_16 <- st_crop(lights_2021_02_16, bb)
@@ -108,7 +111,8 @@ houses <- st_transform(houses, 3083)
 ```{r}
 #| warning: false
 # Read in entire geodatabase
-socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"), quiet = TRUE)
+socioeconomic <- st_read(here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"), 
+                         quiet = TRUE)
 
 # Explore socioeconomic geodatabase layers
 layer_info <- st_layers(dsn = here::here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb"))
@@ -135,7 +139,8 @@ ACS_tracts <- ACS_tract_geometry %>%
   st_as_sf() 
 
 # Crop to Houston area
-bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0), crs = st_crs(ACS_tracts))
+bb <- st_bbox(c(xmin = -96.5, xmax = -94.5, ymax = 30.5, ymin = 29.0),
+              crs = st_crs(ACS_tracts))
 
 ACS_tracts <- st_crop(ACS_tracts, bb) 
 
@@ -169,7 +174,6 @@ To identify places that experienced a blackout, a mask was created to indicate f
 
 ```{r}
 # Find the change in night lights intensity pre and post storm
-# Check for same extent and resolution first! make into WARNING MESSAGE
 light_difference <- lights_2021_02_07 - lights_2021_02_16
 
 # Assign NA to cells that experienced a change less than 200 nW cm-2sr-1
@@ -180,8 +184,8 @@ light_diff_vec <- light_difference %>%
   st_as_sf() %>% 
   st_transform(3083)
 
-# Check for valid geometry- make into WARNING MESSAGE
-print(any(!st_is_valid(light_diff_vec)))
+# Test for valid geometry
+expect_false(any(!st_is_valid(light_diff_vec)))
 ```
 
 ### 3. Exclude highways from analysis
@@ -241,7 +245,7 @@ To identify the census tracts impacted by the blackout, the U.S Census tract dat
 
 ```{r}
 #| message: false
-# Create data frame for tracts that intersect homes that experienced blackouts and create new column of 'TRUE'
+# Create df for tracts that intersect homes that experienced blackouts and create 'TRUE' column
 blackedout_tracts <- st_filter(ACS_tracts, blackout_houses) %>% 
   mutate(blackout = TRUE)
 
@@ -273,21 +277,22 @@ tm_shape(census_true) +
   tm_graticules(alpha = 0.2)
 ```
 
-6.  Create plot comparing distributions of median household income for census tracts that did and did not experience blackouts
+### 6.  Create plots comparing distributions of median household income for census tracts that did and did not experience blackouts
 
 ```{r}
 #| warning: false
 #| message: false
 # Plot histogram of median income faceted by tracts affected and unaffected by the blackouts
 median_income_hist <- ggplot(census, aes(x = B19013e1, fill = blackout)) +
-  geom_histogram(color = "#484f4f") +
+  geom_histogram(color = "#484f4f", bins = 20) +
   scale_fill_manual(values = c("#dce6e5","#6e948c"),
                     labels = c("Unaffected", "Affected")) +
+  scale_x_continuous(labels = label_number(scale = 1e-3)) +
   facet_wrap(~blackout, 
              labeller = as_labeller(c(`TRUE` = "Affected", `FALSE` = "Unaffected")) 
   ) +
   labs(title = "Median Household Income by Census Blackout Status",
-    x = "Median Household Income (USD)",
+    x = "Median Household Income (thousands of USD)",
     y = "Count",
     fill = "Census Tract Status"      
   ) +
@@ -311,5 +316,15 @@ median_income_box <- ggplot(census, aes(x = blackout, y = B19013e1, fill = black
 
 median_income_box
 ```
+### Interpretation
 
-Write interpretation here!!
+Based upon the histogram and bar plot, census tracts that experienced blackouts during the winter storms had a slightly higher estimated median income with a wider range compared to census tracts that did not experience blackouts but there is not a definite disproportionate effect. Based upon the map, many of the census tracts that were affected are located in the metropolitan areas of Houston possibly due to the power grid there being more interconnected. That might have an effect on the income distributions if people living in urban areas have more varied incomes. One study limitation might have been how the blackouts were accounted for, as we don't know for certain that these light differences were due to the storms and not other factors such as day of the week or not having as much activity in the city due to the severe weather conditions.
+
+
+#### Data Citations
+
+[VIIRS](https://ladsweb.modaps.eosdis.nasa.gov/). Accessed Oct 30, 2025
+
+[OpenStreetMap Geofabrik download](https://download.geofabrik.de/). Accessed Oct 30, 2025
+
+[U.S Census Bureau's American Community Survey](https://www.census.gov/programs-surveys/acs). Accessed Oct 30, 2025

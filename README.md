@@ -1,5 +1,7 @@
 # Winter Storm Impact on Houston Power Outages
 
+![Houston Census Tracts](images/readme_image.png){width="445"}
+
 Author: Ava Robillard
 
 This repository contains a Quarto document with an analysis of the power outages in the Houston, Texas area and any disproportionate impacts resulting from a series of severe winter storms in February of 2021.
@@ -46,5 +48,3 @@ This assignment was created as a part of EDS 223: Geospatial Analysis & Remote S
 [OpenStreetMap Geofabrik download](https://download.geofabrik.de/). Accessed Oct 30, 2025
 
 [U.S Census Bureau's American Community Survey](https://www.census.gov/programs-surveys/acs). Accessed Oct 30, 2025
-
-**Papers and other resources**
